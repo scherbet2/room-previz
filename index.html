@@ -81,10 +81,10 @@ button[aria-pressed="true"]{background:var(--accent);color:#141005;border-color:
   <canvas id="view" tabindex="0" aria-label="3D вид проекционной комнаты"></canvas>
   <div class="hud" id="hudKeys">
     <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ходить · <kbd>Shift</kbd> быстрее · <kbd>Space</kbd> прыжок</div>
-    <div><kbd>Колесо</kbd> объектив · <kbd>Q</kbd><kbd>E</kbd> высота камеры · <kbd>R</kbd> видео с начала · <kbd>P</kbd> пауза · <kbd>H</kbd> панель · <kbd>F</kbd> на весь экран</div>
+    <div><kbd>Колесо</kbd> объектив · <kbd>Q</kbd><kbd>E</kbd> высота камеры · <kbd>+</kbd><kbd>−</kbd> засветка · <kbd>R</kbd> видео с начала · <kbd>P</kbd> пауза · <kbd>H</kbd> панель · <kbd>F</kbd> на весь экран</div>
     <div>Мышь: клик захватывает взгляд, <kbd>Esc</kbd> отпускает. Либо тяни с зажатой кнопкой.</div>
   </div>
-  <div class="hud" id="hudLens"><b id="hudF">35</b><span id="hudFov"></span><span id="hudPos"></span></div>
+  <div class="hud" id="hudLens"><b id="hudF">35</b><span id="hudFov"></span><span id="hudPos"></span><span id="hudWash"></span></div>
   <div id="drop">Отпусти файлы.<br>Имена с front, back, left, right, top, bottom встанут в свои слоты сами.</div>
   <button id="toggle" type="button" title="Скрыть или показать панель (H)">Панель</button>
 </div>
@@ -129,8 +129,8 @@ button[aria-pressed="true"]{background:var(--accent);color:#141005;border-color:
       <input type="range" id="gain" min="0.2" max="1.5" step="0.01" value="1"></div>
     <div class="row"><label for="spill">Свет от экранов на кубах</label><output id="oSpill"></output>
       <input type="range" id="spill" min="0" max="3" step="0.05" value="1"></div>
-    <div class="row"><label for="bounce">Паразитная засветка экранов</label><output id="oBounce"></output>
-      <input type="range" id="bounce" min="0" max="0.4" step="0.01" value="0.06"></div>
+    <div class="row"><label for="bounce">Паразитная засветка, клавиши + и −</label><output id="oBounce"></output>
+      <input type="range" id="bounce" min="0" max="1" step="0.01" value="0.06"></div>
     <div class="row"><label for="amb">Дежурный свет</label><output id="oAmb"></output>
       <input type="range" id="amb" min="0" max="0.5" step="0.005" value="0.01"></div>
     <div class="row"><label for="hm">Высота комнаты</label><output id="oHm"></output>
@@ -459,6 +459,10 @@ function setEye(v) {
   state.eye = THREE.MathUtils.clamp(v, 0.2, RH - 0.15);
   $('eye').value = state.eye; $('oEye').textContent = state.eye.toFixed(2) + ' м';
 }
+function setBounce(v) {
+  state.bounce = Math.round(THREE.MathUtils.clamp(v, 0, 1) * 100) / 100;
+  $('bounce').value = state.bounce; $('oBounce').textContent = Math.round(state.bounce * 100) + '%';
+}
 /* ---------- Lens ---------- */
 function applyLens() {
   camera.filmGauge = state.sensor;
@@ -609,6 +613,8 @@ window.addEventListener('keydown', e => {
   if (t === 'BUTTON' && (e.code === 'Space' || e.code === 'Enter')) return;
   if (e.code === 'Space' || e.code.startsWith('Arrow')) { if (t === 'INPUT') return; e.preventDefault(); }
   keys.add(e.code);
+  if (e.code === 'Equal' || e.code === 'NumpadAdd') setBounce(state.bounce + 0.02);
+  else if (e.code === 'Minus' || e.code === 'NumpadSubtract') setBounce(state.bounce - 0.02);
   if (e.repeat) return;
   if (e.code === 'KeyR') syncAll();
   else if (e.code === 'KeyP') setPlaying(!state.playing);
@@ -684,6 +690,7 @@ function frame(now) {
   updateBounce();
   cubeMat.uniforms.spill.value = state.spill * state.gain;
   cubeMat.uniforms.amb.value = state.amb;
+  $('hudWash').textContent = `засветка ${Math.round(state.bounce * 100)}%`;
   $('hudPos').textContent = `до передней стены ${(player.z + RL / 2).toFixed(1)} м`;
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
