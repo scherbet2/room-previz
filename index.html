@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Limitless Room Previz</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: full-bleed 3D viewport on the left, one narrow operator panel on the right. Single dark theme by choice, the room is a blackout space. */
+:root{
+  color-scheme:dark;
+  --bg:#060607;
+  --panel:#101012;
+  --raise:#19191d;
+  --line:#2a2a30;
+  --text:#e9e6df;
+  --dim:#8e8b84;
+  --accent:#e9b44c;
+  --warn:#ff7a59;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.4 var(--sans);display:flex;overflow:hidden}
+#stage{position:relative;flex:1;min-width:0;background:#000}
+#view{display:block;width:100%;height:100%;cursor:grab;outline:none}
+#view:active{cursor:grabbing}
+.hud{position:absolute;pointer-events:none;font:12px/1.5 var(--mono);color:var(--text);text-shadow:0 1px 3px #000}
+#hudLens{left:16px;bottom:14px;display:flex;gap:18px;align-items:baseline}
+#hudLens b{font:500 26px/1 var(--mono);color:var(--accent)}
+#hudLens span{color:var(--dim)}
+#hudKeys{left:16px;top:14px;color:var(--dim);background:#000a;padding:8px 10px;border-radius:6px;border:1px solid #ffffff14}
+#hudKeys kbd{font:500 11px var(--mono);color:var(--text);border:1px solid #ffffff33;border-radius:3px;padding:0 4px;margin-right:2px}
+#drop{position:absolute;inset:12px;border:2px dashed var(--accent);border-radius:10px;background:#000c;display:none;align-items:center;justify-content:center;text-align:center;font-size:16px;padding:24px;pointer-events:none}
+#stage.dragging #drop{display:flex}
+#toggle{position:absolute;right:12px;top:12px}
+
+#panel{width:332px;flex:none;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:20px}
+body.nopanel #panel{display:none}
+h1{font:600 15px/1.2 var(--sans);margin:0;letter-spacing:.02em}
+h1 small{display:block;font:400 12px var(--mono);color:var(--dim);margin-top:4px}
+h2{font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:0 0 10px}
+section{display:flex;flex-direction:column}
+.slots{display:flex;flex-direction:column;gap:8px}
+.slot{display:grid;grid-template-columns:92px 1fr;gap:10px;padding:8px;background:var(--raise);border:1px solid var(--line);border-radius:8px}
+.slot.over{border-color:var(--accent)}
+.slot .thumb{width:92px;height:62px;background:#000;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.slot canvas{max-width:92px;max-height:62px;display:block}
+.slot .meta{min-width:0;display:flex;flex-direction:column;gap:3px}
+.slot .name{font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.slot .name span{font:400 11px var(--mono);color:var(--dim);white-space:nowrap}
+.slot .file{font:11px var(--mono);color:var(--dim);overflow-wrap:anywhere}
+.slot .file.warn{color:var(--warn)}
+.slot .btns{display:flex;gap:4px;margin-top:2px;flex-wrap:wrap}
+button,.btn{font:500 12px var(--sans);color:var(--text);background:#232329;border:1px solid var(--line);border-radius:5px;padding:4px 8px;cursor:pointer}
+button:hover,.btn:hover{border-color:#55555f}
+button:focus-visible,.btn:focus-within,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button[aria-pressed="true"]{background:var(--accent);color:#141005;border-color:var(--accent)}
+.btn input{position:absolute;opacity:0;width:1px;height:1px}
+.row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-bottom:10px}
+.row label{color:var(--text)}
+.row output{font:12px var(--mono);color:var(--accent);font-variant-numeric:tabular-nums}
+.row input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--accent);margin:0}
+.row select{grid-column:1/-1;background:#232329;color:var(--text);border:1px solid var(--line);border-radius:5px;padding:5px;font:13px var(--sans)}
+.lens{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px}
+.lens button{font-family:var(--mono);min-width:38px;padding:4px 0}
+.wrap{display:flex;flex-wrap:wrap;gap:6px}
+.note{font-size:12px;color:var(--dim);margin:8px 0 0}
+@media (max-width:760px){
+  body{flex-direction:column;overflow:auto}
+  #stage{flex:none;height:56%}
+  #panel{width:auto;border-left:0;border-top:1px solid var(--line);overflow:visible}
+  #hudKeys{display:none}
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="view" tabindex="0" aria-label="3D вид проекционной комнаты"></canvas>
+  <div class="hud" id="hudKeys">
+    <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ходить · <kbd>Shift</kbd> быстрее · <kbd>Space</kbd> прыжок</div>
+    <div><kbd>Колесо</kbd> объектив · <kbd>Q</kbd><kbd>E</kbd> высота камеры · <kbd>R</kbd> видео с начала · <kbd>P</kbd> пауза · <kbd>H</kbd> панель · <kbd>F</kbd> на весь экран</div>
+    <div>Мышь: клик захватывает взгляд, <kbd>Esc</kbd> отпускает. Либо тяни с зажатой кнопкой.</div>
+  </div>
+  <div class="hud" id="hudLens"><b id="hudF">35</b><span id="hudFov"></span><span id="hudPos"></span></div>
+  <div id="drop">Отпусти файлы.<br>Имена с front, back, left, right, top, bottom встанут в свои слоты сами.</div>
+  <button id="toggle" type="button" title="Скрыть или показать панель (H)">Панель</button>
+</div>
+
+<aside id="panel">
+  <h1>Limitless Room Previz<small>6 поверхностей · превью 1/6 · контент 30 fps</small></h1>
+
+  <section>
+    <h2>Контент</h2>
+    <div class="wrap" style="margin-bottom:10px">
+      <label class="btn" style="background:var(--accent);color:#141005;border-color:var(--accent)">Загрузить пачкой<input type="file" id="batch" accept="image/*,video/*" multiple></label>
+      <button type="button" id="bDemo">Демо-кадры</button>
+      <button type="button" id="bClear">Очистить всё</button>
+    </div>
+    <p class="note" id="batchNote" style="margin:0 0 10px">Выбери сразу все файлы. Слот определяется по слову FRONT, BACK, LEFT, RIGHT, TOP, BOTTOM в имени.</p>
+    <div class="slots" id="slots"></div>
+    <div class="wrap" style="margin-top:10px">
+      <button type="button" id="bPlay">Пауза</button>
+      <button type="button" id="bSync">Все видео с начала</button>
+      <button type="button" id="bGrid" aria-pressed="true">Тестовая сетка</button>
+    </div>
+    <p class="note">Картинки и видео растягиваются на всю поверхность. Если пропорции файла не совпадают со слотом, строка станет красной.</p>
+  </section>
+
+  <section>
+    <h2>Камера</h2>
+    <div class="lens" id="lens"></div>
+    <div class="row"><label for="sensor">Сенсор</label><output></output>
+      <select id="sensor">
+        <option value="36">Full Frame, 36 мм</option>
+        <option value="24.89">Super 35, 24.9 мм</option>
+      </select></div>
+    <div class="row"><label for="eye">Высота камеры</label><output id="oEye"></output>
+      <input type="range" id="eye" min="0.2" max="6.9" step="0.05" value="1.65"></div>
+    <div class="row"><label for="speed">Скорость ходьбы</label><output id="oSpeed"></output>
+      <input type="range" id="speed" min="0.8" max="6" step="0.1" value="2.2"></div>
+  </section>
+
+  <section>
+    <h2>Свет и комната</h2>
+    <div class="row"><label for="gain">Яркость проекции</label><output id="oGain"></output>
+      <input type="range" id="gain" min="0.2" max="1.5" step="0.01" value="1"></div>
+    <div class="row"><label for="spill">Свет от экранов на кубах</label><output id="oSpill"></output>
+      <input type="range" id="spill" min="0" max="3" step="0.05" value="1"></div>
+    <div class="row"><label for="bounce">Паразитная засветка экранов</label><output id="oBounce"></output>
+      <input type="range" id="bounce" min="0" max="0.4" step="0.01" value="0.06"></div>
+    <div class="row"><label for="amb">Дежурный свет</label><output id="oAmb"></output>
+      <input type="range" id="amb" min="0" max="0.5" step="0.005" value="0.01"></div>
+    <div class="row"><label for="hm">Высота комнаты</label><output id="oHm"></output>
+      <input type="range" id="hm" min="2.6" max="7" step="0.1" value="4.2"></div>
+    <div class="wrap">
+      <button type="button" id="bChairs" aria-pressed="true">Кубы-сиденья</button>
+      <button type="button" id="bFull">На весь экран</button>
+    </div>
+    <p class="note" id="dims"></p>
+  </section>
+</aside>
+
+<script type="module">
+import * as THREE from './three.module.min.js';
+
+/* ---------- Spec ---------- */
+const PX = { L: 7296, W: 5048, H: 2356 };          // real pixels: room length, width, height
+const DIV = 6;                                      // preview textures are 1/6 of the real resolution
+const FOCALS = [12, 14, 16, 18, 21, 24, 28, 35, 40, 50, 65, 85, 100, 135];
+const CUBE = 0.45;
+
+// edges: neighbour names on [top, right, bottom, left] of each frame, seen from inside
+const SLOTS = [
+  { key: 'front',  en: 'FRONT',  ru: 'Передняя', pw: PX.W, ph: PX.H, grid: [2, 1], edges: ['TOP', 'RIGHT', 'BOTTOM', 'LEFT'],  words: ['front', 'перед', 'forward', 'fwd'] },
+  { key: 'left',   en: 'LEFT',   ru: 'Левая',    pw: PX.L, ph: PX.H, grid: [4, 1], edges: ['TOP', 'FRONT', 'BOTTOM', 'BACK'],  words: ['left', 'лев'] },
+  { key: 'right',  en: 'RIGHT',  ru: 'Правая',   pw: PX.L, ph: PX.H, grid: [4, 1], edges: ['TOP', 'BACK', 'BOTTOM', 'FRONT'],  words: ['right', 'прав'] },
+  { key: 'back',   en: 'BACK',   ru: 'Задняя',   pw: PX.W, ph: PX.H, grid: [2, 1], edges: ['TOP', 'LEFT', 'BOTTOM', 'RIGHT'],  words: ['back', 'зад', 'rear'] },
+  { key: 'top',    en: 'TOP',    ru: 'Потолок',  pw: PX.L, ph: PX.W, grid: [4, 2], edges: ['LEFT', 'BACK', 'RIGHT', 'FRONT'],  words: ['top', 'roof', 'ceiling', 'ceil', 'потол', 'верх'] },
+  { key: 'bottom', en: 'BOTTOM', ru: 'Пол',      pw: PX.L, ph: PX.W, grid: [4, 2], edges: ['LEFT', 'FRONT', 'RIGHT', 'BACK'],  words: ['bottom', 'floor', 'пол', 'низ'] },
+];
+const NP = SLOTS.reduce((n, s) => n + s.grid[0] * s.grid[1], 0);
+
+const $ = id => document.getElementById(id);
+const state = {
+  hm: 4.2, eye: 1.65, speed: 2.2, focal: 35, sensor: 36,
+  gain: 1, spill: 1, bounce: 0.06, amb: 0.01,
+  grid: true, chairs: true, playing: true,
+};
+
+/* ---------- Renderer ---------- */
+const canvas = $('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 200);
+camera.rotation.order = 'YXZ';
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+/* ---------- Screens ---------- */
+const screenVS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const screenFS = `
+uniform sampler2D map; uniform float gain; uniform vec3 bounce; varying vec2 vUv;
+void main(){
+  vec3 c = texture2D(map, vUv).rgb * gain + bounce;
+  gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
+}`;
+
+const room = new THREE.Group();
+scene.add(room);
+
+function corners(key, W, L, H) {
+  const hw = W / 2, hl = L / 2, v = (x, y, z) => new THREE.Vector3(x, y, z);
+  // returns [BL, BR, TL] of the frame as seen from inside the room. Front wall is at -Z.
+  switch (key) {
+    case 'front':  return [v(-hw, 0, -hl), v( hw, 0, -hl), v(-hw, H, -hl)];
+    case 'back':   return [v( hw, 0,  hl), v(-hw, 0,  hl), v( hw, H,  hl)];
+    case 'left':   return [v(-hw, 0,  hl), v(-hw, 0, -hl), v(-hw, H,  hl)];
+    case 'right':  return [v( hw, 0, -hl), v( hw, 0,  hl), v( hw, H, -hl)];
+    case 'top':    return [v( hw, H, -hl), v( hw, H,  hl), v(-hw, H, -hl)];   // frame bottom edge meets RIGHT wall, frame left edge meets FRONT
+    case 'bottom': return [v( hw, 0,  hl), v( hw, 0, -hl), v(-hw, 0,  hl)];   // frame top edge meets LEFT wall
+  }
+}
+
+for (const s of SLOTS) {
+  s.w = Math.round(s.pw / DIV); s.h = Math.round(s.ph / DIV);
+  s.canvas = document.createElement('canvas'); s.canvas.width = s.w; s.canvas.height = s.h;
+  s.ctx = s.canvas.getContext('2d', { alpha: false });
+  s.tex = new THREE.CanvasTexture(s.canvas);
+  s.tex.colorSpace = THREE.SRGBColorSpace;
+  s.tex.anisotropy = maxAniso;
+  s.tex.minFilter = THREE.LinearMipmapLinearFilter;
+  s.mat = new THREE.ShaderMaterial({
+    uniforms: { map: { value: s.tex }, gain: { value: 1 }, bounce: { value: new THREE.Color(0, 0, 0) } },
+    vertexShader: screenVS, fragmentShader: screenFS, side: THREE.DoubleSide,
+  });
+  s.geo = new THREE.BufferGeometry();
+  s.geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+  s.geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
+  s.geo.setIndex([0, 1, 2, 0, 2, 3]);
+  s.mesh = new THREE.Mesh(s.geo, s.mat); s.mesh.frustumCulled = false;
+  room.add(s.mesh);
+  // averaging canvases for the light patches
+  const [nu, nv] = s.grid;
+  s.mid = document.createElement('canvas'); s.mid.width = nu * 8; s.mid.height = nv * 8;
+  s.midCtx = s.mid.getContext('2d', { alpha: false });
+  s.tiny = document.createElement('canvas'); s.tiny.width = nu; s.tiny.height = nv;
+  s.tinyCtx = s.tiny.getContext('2d', { alpha: false, willReadFrequently: true });
+  s.avg = new THREE.Color(0, 0, 0);
+  s.src = null; s.flipH = false; s.flipV = false; s.fileInfo = '';
+  s.pattern = makePattern(s);
+}
+
+/* ---------- Test pattern ---------- */
+function makePattern(s) {
+  const c = document.createElement('canvas'); c.width = s.w; c.height = s.h;
+  const g = c.getContext('2d'), w = s.w, h = s.h;
+  g.fillStyle = '#0a0a0b'; g.fillRect(0, 0, w, h);
+  const step = 250 / DIV;                                   // one cell = 250 real pixels
+  g.lineWidth = 1; g.strokeStyle = 'rgba(255,255,255,.10)'; g.beginPath();
+  for (let x = w / 2 % step; x < w; x += step) { g.moveTo(x, 0); g.lineTo(x, h); }
+  for (let y = h / 2 % step; y < h; y += step) { g.moveTo(0, y); g.lineTo(w, y); }
+  g.stroke();
+  g.strokeStyle = 'rgba(70,200,220,.5)'; g.beginPath();
+  g.moveTo(0, 0); g.lineTo(w, h); g.moveTo(w, 0); g.lineTo(0, h);
+  g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.moveTo(0, h / 2); g.lineTo(w, h / 2);
+  g.moveTo(w / 2 + h * 0.42, h / 2); g.arc(w / 2, h / 2, h * 0.42, 0, Math.PI * 2);
+  g.stroke();
+  g.strokeStyle = '#e9b44c'; g.lineWidth = 3; g.strokeRect(1.5, 1.5, w - 3, h - 3);
+  // colour bars and grey ramp
+  const bw = Math.min(w * 0.5, 360), bh = Math.min(h * 0.09, 44), bx = (w - bw) / 2, by = h / 2 + bh * 0.9;
+  ['#fff', '#ff0', '#0ff', '#0f0', '#f0f', '#f00', '#00f', '#000'].forEach((col, i) => { g.fillStyle = col; g.fillRect(bx + i * bw / 8, by, bw / 8 + 1, bh); });
+  for (let i = 0; i < 11; i++) { const v = Math.round(i * 25.5); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(bx + i * bw / 11, by + bh, bw / 11 + 1, bh * 0.6); }
+  // label
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const fs = Math.min(h * 0.13, 64);
+  g.fillStyle = '#000'; g.fillRect(w / 2 - fs * 3.4, h / 2 - fs * 1.75, fs * 6.8, fs * 2.1);
+  g.fillStyle = '#fff'; g.font = `600 ${fs}px "IBM Plex Sans",sans-serif`; g.fillText(s.en, w / 2, h / 2 - fs * 1.05);
+  g.fillStyle = '#bbb'; g.font = `${fs * 0.42}px "IBM Plex Mono",monospace`; g.fillText(`${s.pw} × ${s.ph} px`, w / 2, h / 2 - fs * 0.2);
+  // neighbours on each edge
+  g.fillStyle = '#e9b44c'; g.font = `500 ${Math.max(11, fs * 0.36)}px "IBM Plex Mono",monospace`;
+  const m = Math.max(12, fs * 0.45);
+  g.fillText('▲ ' + s.edges[0], w / 2, m); g.fillText('▼ ' + s.edges[2], w / 2, h - m);
+  g.save(); g.translate(w - m, h / 2); g.rotate(-Math.PI / 2); g.fillText(s.edges[1] + ' ▼', 0, 0); g.restore();
+  g.save(); g.translate(m, h / 2); g.rotate(-Math.PI / 2); g.fillText('▲ ' + s.edges[3], 0, 0); g.restore();
+  return c;
+}
+
+/* ---------- Slot drawing ---------- */
+function drawSlot(s) {
+  const g = s.ctx;
+  let img = null;
+  if (s.src) {
+    if (s.src.type === 'video') { if (s.src.el.readyState >= 2) img = s.src.el; else return; }
+    else img = s.src.el;
+  } else if (state.grid) img = s.pattern;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  if (!img) { g.fillStyle = '#000'; g.fillRect(0, 0, s.w, s.h); }
+  else {
+    g.setTransform(s.flipH ? -1 : 1, 0, 0, s.flipV ? -1 : 1, s.flipH ? s.w : 0, s.flipV ? s.h : 0);
+    g.drawImage(img, 0, 0, s.w, s.h);
+  }
+  s.tex.needsUpdate = true;
+  s.dirty = true;
+}
+function drawThumb(s) { const t = s.thumb; t.getContext('2d').drawImage(s.canvas, 0, 0, t.width, t.height); }
+
+/* ---------- Light patches (screens light the cubes and wash each other) ---------- */
+const P = {
+  pos: Array.from({ length: NP }, () => new THREE.Vector3()),
+  nrm: Array.from({ length: NP }, () => new THREE.Vector3()),
+  col: Array.from({ length: NP }, () => new THREE.Vector3()),
+  area: new Float32Array(NP),
+};
+function layoutPatches(W, L, H) {
+  let i = 0;
+  for (const s of SLOTS) {
+    const [bl, br, tl] = corners(s.key, W, L, H);
+    const du = br.clone().sub(bl), dv = tl.clone().sub(bl);
+    const n = du.clone().cross(dv).normalize();
+    const [nu, nv] = s.grid;
+    s.area = du.length() * dv.length();
+    s.p0 = i;
+    for (let r = 0; r < nv; r++) for (let c = 0; c < nu; c++) {     // row 0 = top of the frame
+      P.pos[i].copy(bl).addScaledVector(du, (c + 0.5) / nu).addScaledVector(dv, 1 - (r + 0.5) / nv);
+      P.nrm[i].copy(n); P.area[i] = s.area / (nu * nv); i++;
+    }
+  }
+}
+const tmpC = new THREE.Color();
+function samplePatches(s) {
+  const [nu, nv] = s.grid;
+  s.midCtx.imageSmoothingQuality = 'high'; s.midCtx.drawImage(s.canvas, 0, 0, s.mid.width, s.mid.height);
+  s.tinyCtx.imageSmoothingQuality = 'high'; s.tinyCtx.drawImage(s.mid, 0, 0, nu, nv);
+  const d = s.tinyCtx.getImageData(0, 0, nu, nv).data;
+  let r = 0, g = 0, b = 0;
+  for (let k = 0; k < nu * nv; k++) {
+    tmpC.setRGB(d[k * 4] / 255, d[k * 4 + 1] / 255, d[k * 4 + 2] / 255, THREE.SRGBColorSpace);
+    P.col[s.p0 + k].set(tmpC.r, tmpC.g, tmpC.b);
+    r += tmpC.r; g += tmpC.g; b += tmpC.b;
+  }
+  s.avg.setRGB(r / (nu * nv), g / (nu * nv), b / (nu * nv));
+  s.dirty = false;
+}
+function updateBounce() {
+  for (const s of SLOTS) {
+    let r = 0, g = 0, b = 0, a = 0;
+    for (const o of SLOTS) if (o !== s) { r += o.avg.r * o.area; g += o.avg.g * o.area; b += o.avg.b * o.area; a += o.area; }
+    const k = state.bounce * state.gain / a;
+    s.mat.uniforms.bounce.value.setRGB(r * k, g * k, b * k);
+    s.mat.uniforms.gain.value = state.gain;
+  }
+}
+
+/* ---------- Cubes ---------- */
+const cubeMat = new THREE.ShaderMaterial({
+  uniforms: {
+    pPos: { value: P.pos }, pNrm: { value: P.nrm }, pCol: { value: P.col }, pArea: { value: P.area },
+    spill: { value: 1 }, amb: { value: 0.01 },
+  },
+  vertexShader: `
+    varying vec3 vW; varying vec3 vN;
+    void main(){
+      mat4 m = modelMatrix;
+      #ifdef USE_INSTANCING
+        m = modelMatrix * instanceMatrix;
+      #endif
+      vec4 wp = m * vec4(position, 1.0);
+      vW = wp.xyz; vN = normalize(mat3(m) * normal);
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: `
+    #define NP ${NP}
+    uniform vec3 pPos[NP]; uniform vec3 pNrm[NP]; uniform vec3 pCol[NP]; uniform float pArea[NP];
+    uniform float spill; uniform float amb;
+    varying vec3 vW; varying vec3 vN;
+    void main(){
+      vec3 n = normalize(vN); vec3 e = vec3(0.0);
+      for (int i = 0; i < NP; i++) {
+        vec3 d = pPos[i] - vW; float d2 = dot(d, d); vec3 l = d * inversesqrt(d2);
+        float cr = max(dot(n, l), 0.0); float ce = max(dot(pNrm[i], -l), 0.0);
+        e += pCol[i] * (pArea[i] * cr * ce / (3.14159 * d2 + pArea[i]));
+      }
+      vec3 c = 0.82 * (e * spill * 1.6 + vec3(amb));
+      gl_FragColor = vec4(c, 1.0);
+      #include <colorspace_fragment>
+    }`,
+});
+let cubes = null, cubeList = [];
+function buildCubes(W, L) {
+  if (cubes) { scene.remove(cubes); cubes.dispose(); }
+  cubeList = [];
+  const dx = 1.15, dz = 1.25, zx = W * 0.33, zz = L * 0.30;
+  const rows = Math.max(1, Math.floor(zz * 2 / dz) + 1);
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let r = 0; r < rows; r++) {
+    const z = -zz + r * (zz * 2) / Math.max(1, rows - 1);
+    const off = r % 2 ? dx / 2 : 0;
+    for (let x = -zx + off; x <= zx + 0.01; x += dx) {
+      if (Math.abs(x) < 0.3 && r % 2 === 0) continue;                    // loose centre aisle
+      cubeList.push({ x: x + (rnd() - 0.5) * 0.12, z: z + (rnd() - 0.5) * 0.12, rot: (rnd() - 0.5) * 0.25 });
+    }
+  }
+  cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(CUBE, CUBE, CUBE), cubeMat, cubeList.length);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+  cubeList.forEach((c, i) => { q.setFromAxisAngle(up, c.rot); m.compose(new THREE.Vector3(c.x, CUBE / 2, c.z), q, one); cubes.setMatrixAt(i, m); });
+  cubes.frustumCulled = false; cubes.visible = state.chairs;
+  scene.add(cubes);
+}
+
+/* ---------- Room build ---------- */
+let RW = 0, RL = 0, RH = 0;
+function buildRoom() {
+  const k = state.hm / PX.H;
+  RH = state.hm; RW = PX.W * k; RL = PX.L * k;
+  for (const s of SLOTS) {
+    const [bl, br, tl] = corners(s.key, RW, RL, RH);
+    const tr = br.clone().add(tl).sub(bl), a = s.geo.attributes.position;
+    [bl, br, tr, tl].forEach((p, i) => a.setXYZ(i, p.x, p.y, p.z));
+    a.needsUpdate = true;
+  }
+  layoutPatches(RW, RL, RH);
+  buildCubes(RW, RL);
+  $('dims').textContent = `Комната в модели: ${RL.toFixed(1)} × ${RW.toFixed(1)} × ${RH.toFixed(1)} м (длина, ширина, высота). Пропорции взяты из пикселей, высоту подгони под реальную.`;
+  player.x = THREE.MathUtils.clamp(player.x, -RW / 2 + 0.3, RW / 2 - 0.3);
+  player.z = THREE.MathUtils.clamp(player.z, -RL / 2 + 0.3, RL / 2 - 0.3);
+}
+
+/* ---------- Player ---------- */
+const player = { x: 0, y: 0, z: 0, vy: 0, yaw: 0, pitch: 0, onGround: true };
+const keys = new Set();
+const PR = 0.25;
+function hitsCube(x, z, feet) {
+  return false;
+  const r = CUBE / 2 + PR;
+  for (const c of cubeList) if (feet < CUBE - 0.02 && Math.abs(x - c.x) < r && Math.abs(z - c.z) < r) return true;
+  return false;
+}
+function groundAt(x, z, feet) {
+  return 0;
+  const r = CUBE / 2 + PR;
+  for (const c of cubeList) if (feet >= CUBE - 0.02 && Math.abs(x - c.x) < r && Math.abs(z - c.z) < r) return CUBE;
+  return 0;
+}
+function step(dt) {
+  let f = 0, s = 0;
+  if (keys.has('KeyW') || keys.has('ArrowUp')) f += 1;
+  if (keys.has('KeyS') || keys.has('ArrowDown')) f -= 1;
+  if (keys.has('KeyD') || keys.has('ArrowRight')) s += 1;
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) s -= 1;
+  const len = Math.hypot(f, s);
+  if (len) {
+    const sp = state.speed * (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 2.4 : 1) * dt / len;
+    const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
+    const mx = (-sin * f + cos * s) * sp, mz = (-cos * f - sin * s) * sp;
+    const nx = THREE.MathUtils.clamp(player.x + mx, -RW / 2 + 0.3, RW / 2 - 0.3);
+    if (!hitsCube(nx, player.z, player.y)) player.x = nx;
+    const nz = THREE.MathUtils.clamp(player.z + mz, -RL / 2 + 0.3, RL / 2 - 0.3);
+    if (!hitsCube(player.x, nz, player.y)) player.z = nz;
+  }
+  const dh = (keys.has('KeyE') ? 1 : 0) - (keys.has('KeyQ') ? 1 : 0);
+  if (dh) setEye(state.eye + dh * 1.2 * dt);
+  if (keys.has('Space') && player.onGround) { player.vy = 4.6; player.onGround = false; }
+  player.vy -= 14 * dt;
+  player.y += player.vy * dt;
+  const g = groundAt(player.x, player.z, player.y - player.vy * dt);
+  if (player.y <= g) { player.y = g; player.vy = 0; player.onGround = true; } else player.onGround = false;
+  const top = RH - 0.12 - state.eye;
+  if (player.y > top) { player.y = Math.max(0, top); player.vy = Math.min(0, player.vy); }
+  camera.position.set(player.x, Math.min(player.y + state.eye, RH - 0.1), player.z);
+  camera.rotation.set(player.pitch, player.yaw, 0);
+}
+
+function setEye(v) {
+  state.eye = THREE.MathUtils.clamp(v, 0.2, RH - 0.15);
+  $('eye').value = state.eye; $('oEye').textContent = state.eye.toFixed(2) + ' м';
+}
+/* ---------- Lens ---------- */
+function applyLens() {
+  camera.filmGauge = state.sensor;
+  camera.setFocalLength(state.focal);
+  const hf = 2 * Math.atan(state.sensor / Math.max(camera.aspect, 1) * camera.aspect / (2 * state.focal)) * 180 / Math.PI;
+  $('hudF').textContent = state.focal + ' мм';
+  $('hudFov').textContent = `угол ${hf.toFixed(0)}° по горизонтали`;
+  for (const b of $('lens').children) b.setAttribute('aria-pressed', String(+b.dataset.f === state.focal));
+}
+function stepLens(d) {
+  let i = FOCALS.indexOf(state.focal);
+  i = THREE.MathUtils.clamp(i + d, 0, FOCALS.length - 1);
+  state.focal = FOCALS[i]; applyLens();
+}
+FOCALS.forEach(f => {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = f; b.dataset.f = f;
+  b.title = f + ' мм'; b.onclick = () => { state.focal = f; applyLens(); };
+  $('lens').append(b);
+});
+
+/* ---------- Slots UI and loading ---------- */
+function setInfo(s) {
+  const el = s.ui.file;
+  if (!s.src) { el.textContent = 'пусто'; el.className = 'file'; return; }
+  const sw = s.src.w, sh = s.src.h, off = Math.abs((sw / sh) / (s.pw / s.ph) - 1);
+  el.textContent = `${s.src.name} · ${sw}×${sh}` + (off > 0.015 ? ' · пропорции не совпадают' : '');
+  el.className = 'file' + (off > 0.015 ? ' warn' : '');
+}
+function clearSlot(s) {
+  if (s.src) { if (s.src.type === 'video') { s.src.el.pause(); s.src.el.removeAttribute('src'); s.src.el.load(); } URL.revokeObjectURL(s.src.url); }
+  s.src = null; setInfo(s); drawSlot(s); drawThumb(s);
+}
+function loadFile(s, file) {
+  if (!file) return;
+  const isVid = file.type.startsWith('video/'), isImg = file.type.startsWith('image/');
+  if (!isVid && !isImg) { s.ui.file.textContent = `${file.name}: нужен файл картинки или видео`; s.ui.file.className = 'file warn'; return; }
+  const url = URL.createObjectURL(file);
+  const fail = () => { URL.revokeObjectURL(url); s.ui.file.textContent = `${file.name}: браузер не смог открыть файл. Для видео надёжнее всего mp4 (H.264) или webm.`; s.ui.file.className = 'file warn'; };
+  if (isImg) {
+    const el = new Image();
+    el.onload = () => { clearSlot(s); s.src = { type: 'image', el, url, name: file.name, w: el.naturalWidth, h: el.naturalHeight }; setInfo(s); drawSlot(s); drawThumb(s); };
+    el.onerror = fail; el.src = url;
+  } else {
+    const el = document.createElement('video');
+    el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto';
+    el.onloadeddata = () => {
+      el.onloadeddata = null;
+      clearSlot(s); s.src = { type: 'video', el, url, name: file.name, w: el.videoWidth, h: el.videoHeight }; setInfo(s);
+      if (state.playing) el.play().catch(() => {});
+      drawSlot(s); drawThumb(s);
+    };
+    el.onerror = fail; el.src = url;
+  }
+}
+function slotForName(name) {
+  const tokens = name.toLowerCase().replace(/\.[^.]+$/, '').split(/[^a-zа-яё]+/i).filter(Boolean);
+  for (const key of ['top', 'bottom', 'front', 'back', 'left', 'right']) {
+    const s = SLOTS.find(x => x.key === key);
+    if (tokens.some(t => s.words.some(w => /[а-я]/.test(w) ? t.startsWith(w) : t === w))) return s;
+  }
+  return null;
+}
+for (const s of SLOTS) {
+  const row = document.createElement('div'); row.className = 'slot';
+  row.innerHTML = `
+    <div class="thumb"><canvas></canvas></div>
+    <div class="meta">
+      <div class="name">${s.ru}<span>${s.en} ${s.pw}×${s.ph}</span></div>
+      <div class="file">пусто</div>
+      <div class="btns">
+        <label class="btn">Загрузить<input type="file" id="file-${s.key}" accept="image/*,video/*"></label>
+        <button type="button" data-a="h" aria-pressed="false" title="Отразить по горизонтали">⇄</button>
+        <button type="button" data-a="v" aria-pressed="false" title="Отразить по вертикали">⇅</button>
+        <button type="button" data-a="x" title="Очистить слот">✕</button>
+      </div>
+    </div>`;
+  const t = row.querySelector('canvas'), k = Math.min(92 / s.w, 62 / s.h);
+  t.width = Math.round(s.w * k * 2); t.height = Math.round(s.h * k * 2);
+  t.style.width = t.width / 2 + 'px'; t.style.height = t.height / 2 + 'px';
+  s.thumb = t; s.ui = { row, file: row.querySelector('.file') };
+  row.querySelector('input').onchange = e => { loadFile(s, e.target.files[0]); e.target.value = ''; };
+  row.querySelector('[data-a=h]').onclick = e => { s.flipH = !s.flipH; e.currentTarget.setAttribute('aria-pressed', s.flipH); drawSlot(s); drawThumb(s); };
+  row.querySelector('[data-a=v]').onclick = e => { s.flipV = !s.flipV; e.currentTarget.setAttribute('aria-pressed', s.flipV); drawSlot(s); drawThumb(s); };
+  row.querySelector('[data-a=x]').onclick = () => clearSlot(s);
+  row.ondragover = e => { e.preventDefault(); e.stopPropagation(); row.classList.add('over'); };
+  row.ondragleave = () => row.classList.remove('over');
+  row.ondrop = e => { e.preventDefault(); e.stopPropagation(); row.classList.remove('over'); $('stage').classList.remove('dragging'); loadFile(s, e.dataTransfer.files[0]); };
+  $('slots').append(row);
+}
+// dropping a batch anywhere else: route by file name
+const stage = $('stage');
+window.addEventListener('dragover', e => { e.preventDefault(); stage.classList.add('dragging'); });
+window.addEventListener('dragleave', e => { if (!e.relatedTarget) stage.classList.remove('dragging'); });
+window.addEventListener('drop', e => {
+  e.preventDefault(); stage.classList.remove('dragging');
+  routeFiles(e.dataTransfer.files);
+});
+function routeFiles(list) {
+  const taken = new Set(), lost = [];
+  for (const f of list) {
+    const s = slotForName(f.name);
+    if (s && !taken.has(s)) { taken.add(s); loadFile(s, f); } else lost.push(f.name);
+  }
+  const n = $('batchNote');
+  n.textContent = `Разложено по слотам: ${taken.size}.` + (lost.length ? ` Не понял, куда поставить: ${lost.join(', ')}. В имени нужно слово FRONT, BACK, LEFT, RIGHT, TOP или BOTTOM, по одному файлу на слот.` : '');
+  n.style.color = lost.length ? 'var(--warn)' : '';
+}
+$('batch').onchange = e => { routeFiles(e.target.files); e.target.value = ''; };
+function loadDemo() {
+  for (const s of SLOTS) {
+    const name = `sh_160_${s.en}.jpg`, el = new Image();
+    el.onload = () => { clearSlot(s); s.src = { type: 'image', el, url: '', name, w: el.naturalWidth, h: el.naturalHeight }; setInfo(s); drawSlot(s); drawThumb(s); };
+    el.src = './demo/' + name;
+  }
+}
+$('bDemo').onclick = loadDemo;
+$('bClear').onclick = () => SLOTS.forEach(clearSlot);
+
+/* ---------- Controls ---------- */
+function bindRange(id, key, fmt, after) {
+  const el = $(id), out = el.parentElement.querySelector('output');
+  const upd = () => { state[key] = +el.value; out.textContent = fmt(state[key]); after && after(); };
+  el.addEventListener('input', upd); upd();
+}
+function videos() { return SLOTS.filter(s => s.src && s.src.type === 'video').map(s => s.src.el); }
+function setPlaying(p) {
+  state.playing = p; $('bPlay').textContent = p ? 'Пауза' : 'Играть';
+  videos().forEach(v => p ? v.play().catch(() => {}) : v.pause());
+}
+function syncAll() { videos().forEach(v => { v.currentTime = 0; }); setPlaying(true); }
+function toggleFull() { try { (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen())?.catch?.(() => {}); } catch (e) {} }
+function togglePanel() { document.body.classList.toggle('nopanel'); resize(); }
+
+$('bPlay').onclick = () => setPlaying(!state.playing);
+$('bSync').onclick = syncAll;
+$('bGrid').onclick = e => { state.grid = !state.grid; e.currentTarget.setAttribute('aria-pressed', state.grid); SLOTS.forEach(s => { if (!s.src) { drawSlot(s); drawThumb(s); } }); };
+$('bChairs').onclick = e => { state.chairs = !state.chairs; e.currentTarget.setAttribute('aria-pressed', state.chairs); if (cubes) cubes.visible = state.chairs; };
+$('bFull').onclick = toggleFull;
+$('toggle').onclick = togglePanel;
+$('sensor').onchange = e => { state.sensor = +e.target.value; applyLens(); };
+// after a pointer interaction give the keyboard back to the walk controls
+$('panel').addEventListener('pointerup', () => setTimeout(() => { const a = document.activeElement; if (a && a.tagName !== 'SELECT') a.blur(); }, 0));
+$('toggle').addEventListener('pointerup', e => e.currentTarget.blur());
+
+window.addEventListener('keydown', e => {
+  const t = e.target.tagName;
+  if (t === 'SELECT' || (t === 'INPUT' && e.target.type !== 'range') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (t === 'BUTTON' && (e.code === 'Space' || e.code === 'Enter')) return;
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) { if (t === 'INPUT') return; e.preventDefault(); }
+  keys.add(e.code);
+  if (e.repeat) return;
+  if (e.code === 'KeyR') syncAll();
+  else if (e.code === 'KeyP') setPlaying(!state.playing);
+  else if (e.code === 'KeyH') togglePanel();
+  else if (e.code === 'KeyF') toggleFull();
+});
+window.addEventListener('keyup', e => keys.delete(e.code));
+window.addEventListener('blur', () => keys.clear());
+
+let dragging = false;
+canvas.addEventListener('mousedown', () => { dragging = true; canvas.focus(); });
+window.addEventListener('mouseup', () => { dragging = false; });
+canvas.addEventListener('click', () => {
+  if (document.pointerLockElement === canvas) return;
+  try { canvas.requestPointerLock()?.catch?.(() => {}); } catch (e) {}
+});
+window.addEventListener('mousemove', e => {
+  if (!dragging && document.pointerLockElement !== canvas) return;
+  const k = 0.0022 * THREE.MathUtils.clamp(35 / state.focal, 0.3, 1);
+  player.yaw -= e.movementX * k;
+  player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * k, -1.55, 1.55);
+});
+let wheelAcc = 0;
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  wheelAcc += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+  while (Math.abs(wheelAcc) >= 50) { stepLens(wheelAcc < 0 ? 1 : -1); wheelAcc -= Math.sign(wheelAcc) * 50; }
+}, { passive: false });
+// touch look
+let touch = null;
+canvas.addEventListener('touchstart', e => { touch = e.touches[0]; }, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  const t = e.touches[0]; if (!touch) return;
+  player.yaw += (t.clientX - touch.clientX) * 0.004;
+  player.pitch = THREE.MathUtils.clamp(player.pitch + (t.clientY - touch.clientY) * 0.004, -1.55, 1.55);
+  touch = t; e.preventDefault();
+}, { passive: false });
+
+/* ---------- Resize ---------- */
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; applyLens();
+}
+new ResizeObserver(resize).observe(stage);
+
+/* ---------- Init ---------- */
+bindRange('hm', 'hm', v => v.toFixed(1) + ' м', () => buildRoom());
+bindRange('eye', 'eye', v => v.toFixed(2) + ' м', () => { if (RH) setEye(state.eye); });
+bindRange('speed', 'speed', v => v.toFixed(1) + ' м/с');
+bindRange('gain', 'gain', v => Math.round(v * 100) + '%');
+bindRange('spill', 'spill', v => Math.round(v * 100) + '%');
+bindRange('bounce', 'bounce', v => Math.round(v * 100) + '%');
+bindRange('amb', 'amb', v => (v * 100).toFixed(1) + '%');
+player.z = RL / 2 - 1.6;
+SLOTS.forEach(s => { drawSlot(s); drawThumb(s); });
+resize();
+loadDemo();
+(document.fonts?.ready || Promise.resolve()).then(() => SLOTS.forEach(s => { s.pattern = makePattern(s); if (!s.src) { drawSlot(s); drawThumb(s); } }));
+
+/* ---------- Loop: content ticks at 30 fps, camera at display rate ---------- */
+let last = performance.now(), acc = 0, tick = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  step(dt);
+  acc += dt;
+  if (acc >= 1 / 30) {
+    acc %= 1 / 30; tick++;
+    for (const s of SLOTS) if (s.src && s.src.type === 'video' && !s.src.el.paused) { drawSlot(s); if (tick % 15 === 0) drawThumb(s); }
+    for (const s of SLOTS) if (s.dirty && (tick % 2 === 0 || !(s.src && s.src.type === 'video'))) samplePatches(s);
+  }
+  updateBounce();
+  cubeMat.uniforms.spill.value = state.spill * state.gain;
+  cubeMat.uniforms.amb.value = state.amb;
+  $('hudPos').textContent = `до передней стены ${(player.z + RL / 2).toFixed(1)} м`;
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__room = { SLOTS, state, player, loadFile, slotForName };
+</script>
+</body>
+</html>
