@@ -35,6 +35,8 @@ body{background:var(--bg);color:var(--text);font:14px/1.4 var(--sans);display:fl
 #hudKeys kbd{font:500 11px var(--mono);color:var(--text);border:1px solid #ffffff33;border-radius:3px;padding:0 4px;margin-right:2px}
 #drop{position:absolute;inset:12px;border:2px dashed var(--accent);border-radius:10px;background:#000c;display:none;align-items:center;justify-content:center;text-align:center;font-size:16px;padding:24px;pointer-events:none}
 #stage.dragging #drop{display:flex}
+#toast{left:50%;top:18px;transform:translateX(-50%);background:#000c;border:1px solid var(--accent);border-radius:6px;padding:8px 14px;font-size:13px;opacity:0;transition:opacity .2s}
+#toast.on{opacity:1}
 #toggle{position:absolute;right:12px;top:12px}
 
 #panel{width:332px;flex:none;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:20px}
@@ -81,10 +83,11 @@ button[aria-pressed="true"]{background:var(--accent);color:#141005;border-color:
   <canvas id="view" tabindex="0" aria-label="3D вид проекционной комнаты"></canvas>
   <div class="hud" id="hudKeys">
     <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ходить · <kbd>Shift</kbd> быстрее · <kbd>Space</kbd> прыжок</div>
-    <div><kbd>Колесо</kbd> объектив · <kbd>Q</kbd><kbd>E</kbd> высота камеры · <kbd>+</kbd><kbd>−</kbd> засветка · <kbd>R</kbd> видео с начала · <kbd>P</kbd> пауза · <kbd>H</kbd> панель · <kbd>F</kbd> на весь экран</div>
+    <div><kbd>Колесо</kbd> объектив · <kbd>Q</kbd><kbd>E</kbd> высота камеры · <kbd>+</kbd><kbd>−</kbd> засветка · <kbd>R</kbd> скрин в буфер · <kbd>T</kbd> видео с начала · <kbd>P</kbd> пауза · <kbd>H</kbd> панель · <kbd>F</kbd> на весь экран</div>
     <div>Мышь: клик захватывает взгляд, <kbd>Esc</kbd> отпускает. Либо тяни с зажатой кнопкой.</div>
   </div>
   <div class="hud" id="hudLens"><b id="hudF">35</b><span id="hudFov"></span><span id="hudPos"></span><span id="hudWash"></span></div>
+  <div class="hud" id="toast" role="status"></div>
   <div id="drop">Отпусти файлы.<br>Имена с front, back, left, right, top, bottom встанут в свои слоты сами.</div>
   <button id="toggle" type="button" title="Скрыть или показать панель (H)">Панель</button>
 </div>
@@ -137,6 +140,7 @@ button[aria-pressed="true"]{background:var(--accent);color:#141005;border-color:
       <input type="range" id="hm" min="2.6" max="7" step="0.1" value="4.2"></div>
     <div class="wrap">
       <button type="button" id="bChairs" aria-pressed="true">Кубы-сиденья</button>
+      <button type="button" id="bSnap">Скрин в буфер, R</button>
       <button type="button" id="bFull">На весь экран</button>
     </div>
     <p class="note" id="dims"></p>
@@ -596,6 +600,24 @@ function syncAll() { videos().forEach(v => { v.currentTime = 0; }); setPlaying(t
 function toggleFull() { try { (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen())?.catch?.(() => {}); } catch (e) {} }
 function togglePanel() { document.body.classList.toggle('nopanel'); resize(); }
 
+let toastT = 0;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2600); }
+function snap() {
+  renderer.render(scene, camera);                       // fresh frame, then grab it before the buffer is cleared
+  const blob = new Promise(res => canvas.toBlob(res, 'image/png'));
+  const size = `${canvas.width}×${canvas.height}, ${state.focal} мм`;
+  const save = () => blob.then(b => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+    a.download = `room_${state.focal}mm_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast('Буфер обмена недоступен, скрин сохранён файлом PNG');
+  });
+  try {
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      .then(() => toast(`Скрин в буфере обмена · ${size}`), save);
+  } catch (e) { save(); }
+}
+$('bSnap').onclick = snap;
 $('bPlay').onclick = () => setPlaying(!state.playing);
 $('bSync').onclick = syncAll;
 $('bGrid').onclick = e => { state.grid = !state.grid; e.currentTarget.setAttribute('aria-pressed', state.grid); SLOTS.forEach(s => { if (!s.src) { drawSlot(s); drawThumb(s); } }); };
@@ -616,7 +638,8 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Equal' || e.code === 'NumpadAdd') setBounce(state.bounce + 0.02);
   else if (e.code === 'Minus' || e.code === 'NumpadSubtract') setBounce(state.bounce - 0.02);
   if (e.repeat) return;
-  if (e.code === 'KeyR') syncAll();
+  if (e.code === 'KeyR') snap();
+  else if (e.code === 'KeyT') syncAll();
   else if (e.code === 'KeyP') setPlaying(!state.playing);
   else if (e.code === 'KeyH') togglePanel();
   else if (e.code === 'KeyF') toggleFull();
